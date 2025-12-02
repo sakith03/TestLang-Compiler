@@ -1,0 +1,40 @@
+config {
+  base_url = "http://localhost:8080";
+  header "Content-Type" = "application/json";
+  header "X-App" = "TestLangDemo";
+}
+
+// Variables
+let user = "sakith";
+let id = 3;
+
+test Login
+ active : true
+ "This explains a function description"
+ {
+  POST "/api/login" {
+    body = "{ \"username\": \"$user\", \"password\": \"2003\" }";
+  };
+  expect status = 200;
+  expect header "Content-Type" contains "json";
+  expect body contains "\"token\":";
+
+}
+
+
+test GetUser active : false {
+  GET "/api/users/";
+  expect status = 200;
+  expect body contains "\"id\": 3";
+}
+
+test CreateUser {
+  POST "/api/users" {
+    header "Content-Type" = "application/json";
+    body = "{ \"name\": \"bhagya\", \"email\": \"bhagya@gmail.com\", \"role\": \"USER\" }";
+  };
+  expect status = 201;
+  expect header "Content-Type" contains "json";
+  expect body contains "\"name\": \"bhagya\"";
+  expect body contains "\"role\": \"USER\"";
+}

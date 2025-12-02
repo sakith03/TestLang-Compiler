@@ -1,0 +1,232 @@
+import java_cup.runtime.*;
+import ast.*;
+import java.util.*;
+
+parser code {:
+  public void report_error(String message, Object info) {
+    StringBuilder m = new StringBuilder("Error");
+    if (info instanceof Symbol) {
+      Symbol s = (Symbol) info;
+      if (s.left >= 0) {
+        m.append(" at line ").append(s.left+1).append(", column ").append(s.right+1);
+      }
+    }
+    m.append(": ").append(message);
+    System.err.println(m);
+  }
+
+  public void report_fatal_error(String message, Object info) {
+    report_error(message, info);
+    System.exit(1);
+  }
+:};
+
+// Terminal symbols
+terminal CONFIG, BASE_URL, HEADER, LET, TEST;
+terminal ACTIVE, TRUE, FALSE;
+terminal GET, POST, PUT, DELETE;
+terminal EXPECT, STATUS, BODY, CONTAINS, IN;
+terminal LBRACE, RBRACE, SEMICOLON, EQUALS, DOTDOT, VERDOTDOT;
+terminal String IDENTIFIER, STRING, MULTILINE_STRING;
+terminal Integer NUMBER;
+
+// Non-terminals
+non terminal Program program;
+non terminal Config config_block;
+non terminal List<Variable> var_decls;
+non terminal Variable var_decl;
+non terminal List<TestBlock> test_blocks;
+non terminal TestBlock test_block;
+non terminal List<Statement> statements;
+non terminal Statement statement;
+non terminal HttpRequest http_request;
+non terminal Map<String, String> header_lines;
+non terminal Map<String, Object> request_block;
+non terminal String request_body;
+non terminal Assertion assertion;
+non terminal Object value;
+non terminal Boolean boolean_value;
+
+// Grammar
+start with program;
+
+program ::=
+    config_block:c var_decls:v test_blocks:t
+    {: RESULT = new Program(c, v, t); :}
+  | var_decls:v test_blocks:t
+    {: RESULT = new Program(null, v, t); :}
+  | test_blocks:t
+    {: RESULT = new Program(null, null, t); :}
+  ;
+
+config_block ::=
+    CONFIG LBRACE BASE_URL EQUALS STRING:url SEMICOLON header_lines:h RBRACE
+    {: RESULT = new Config(url, h); :}
+  | CONFIG LBRACE BASE_URL EQUALS STRING:url SEMICOLON RBRACE
+    {: RESULT = new Config(url, new HashMap<>()); :}
+  | CONFIG LBRACE header_lines:h RBRACE
+    {: RESULT = new Config(null, h); :}
+  ;
+
+header_lines ::=
+    HEADER STRING:k EQUALS STRING:v SEMICOLON header_lines:h
+    {: h.put(k, v); RESULT = h; :}
+  | HEADER STRING:k EQUALS STRING:v SEMICOLON
+    {: Map<String, String> m = new HashMap<>(); m.put(k, v); RESULT = m; :}
+  ;
+
+var_decls ::=
+    var_decls:list var_decl:v
+    {: list.add(v); RESULT = list; :}
+  | var_decl:v
+    {: List<Variable> list = new ArrayList<>(); list.add(v); RESULT = list; :}
+  ;
+
+
+  boolean_value ::=
+      TRUE  {: RESULT = true; :}
+    | FALSE {: RESULT = false; :}
+    ;
+
+
+var_decl ::=
+    LET IDENTIFIER:name EQUALS value:val SEMICOLON
+    {: RESULT = new Variable(name, val); :}
+  ;
+
+value ::=
+    STRING:s {: RESULT = s; :}
+  | NUMBER:n {: RESULT = n; :}
+  ;
+
+test_blocks ::=
+    test_blocks:list test_block:t
+    {: list.add(t); RESULT = list; :}
+  | test_block:t
+    {: List<TestBlock> list = new ArrayList<>(); list.add(t); RESULT = list; :}
+  ;
+
+
+  test_block ::=
+          TEST IDENTIFIER:name STRING:desc ACTIVE VERDOTDOT boolean_value:isActive
+          LBRACE statements:stmts RBRACE
+            {: RESULT = new TestBlock(name, isActive, desc, stmts); :}
+         |   TEST IDENTIFIER:name ACTIVE VERDOTDOT boolean_value:isActive STRING:desc
+          LBRACE statements:stmts RBRACE
+          {: RESULT = new TestBlock(name, isActive, desc, stmts); :}
+       |   TEST IDENTIFIER:name STRING:desc LBRACE statements:stmts RBRACE
+          {: RESULT = new TestBlock(name, desc, stmts); :}
+      |   TEST IDENTIFIER:name ACTIVE VERDOTDOT boolean_value:isActive
+          LBRACE statements:stmts RBRACE
+          {: RESULT = new TestBlock(name, isActive, stmts); :}
+      |   TEST IDENTIFIER:name LBRACE statements:stmts RBRACE
+          {: RESULT = new TestBlock(name, stmts); :}
+  ;
+
+
+statements ::=
+    statements:list statement:s
+    {: list.add(s); RESULT = list; :}
+  | statement:s
+    {: List<Statement> list = new ArrayList<>(); list.add(s); RESULT = list; :}
+  ;
+
+statement ::=
+    http_request:r {: RESULT = r; :}
+  | assertion:a {: RESULT = a; :}
+  ;
+
+http_request ::=
+    GET STRING:path SEMICOLON
+    {: RESULT = new HttpRequest("GET", path, null, null); :}
+  | GET STRING:path error
+    {: 
+       report_error("expected ';' after request", null);
+       RESULT = new HttpRequest("GET", path, null, null);
+     :}
+  | DELETE STRING:path SEMICOLON
+    {: RESULT = new HttpRequest("DELETE", path, null, null); :}
+  | DELETE STRING:path error
+    {: 
+       report_error("expected ';' after request", null);
+       RESULT = new HttpRequest("DELETE", path, null, null);
+     :}
+  | POST STRING:path LBRACE request_block:rb RBRACE SEMICOLON
+    {: RESULT = new HttpRequest("POST", path, rb.containsKey("__headers__") ?
+       (Map<String,String>)rb.get("__headers__") : null, (String)rb.get("__body__")); :}
+  | POST STRING:path LBRACE request_block:rb RBRACE error
+    {: 
+       report_error("expected ';' after request", null);
+       RESULT = new HttpRequest("POST", path, rb.containsKey("__headers__") ?
+          (Map<String,String>)rb.get("__headers__") : null, (String)rb.get("__body__"));
+     :}
+  | POST STRING:path LBRACE RBRACE SEMICOLON
+    {: RESULT = new HttpRequest("POST", path, null, null); :}
+  | POST STRING:path LBRACE RBRACE error
+    {: 
+       report_error("expected ';' after request", null);
+       RESULT = new HttpRequest("POST", path, null, null);
+     :}
+  | PUT STRING:path LBRACE request_block:rb RBRACE SEMICOLON
+    {: RESULT = new HttpRequest("PUT", path, rb.containsKey("__headers__") ?
+       (Map<String,String>)rb.get("__headers__") : null, (String)rb.get("__body__")); :}
+  | PUT STRING:path LBRACE request_block:rb RBRACE error
+    {: 
+       report_error("expected ';' after request", null);
+       RESULT = new HttpRequest("PUT", path, rb.containsKey("__headers__") ?
+          (Map<String,String>)rb.get("__headers__") : null, (String)rb.get("__body__"));
+     :}
+  | PUT STRING:path LBRACE RBRACE SEMICOLON
+    {: RESULT = new HttpRequest("PUT", path, null, null); :}
+  | PUT STRING:path LBRACE RBRACE error
+    {: 
+       report_error("expected ';' after request", null);
+       RESULT = new HttpRequest("PUT", path, null, null);
+     :}
+  ;
+
+request_block ::=
+    header_lines:h request_body:b
+    {: Map<String, Object> m = new HashMap<>();
+       m.put("__headers__", h);
+       m.put("__body__", b);
+       RESULT = m; :}
+  | header_lines:h
+    {: Map<String, Object> m = new HashMap<>();
+       m.put("__headers__", h);
+       RESULT = m; :}
+  | request_body:b
+    {: Map<String, Object> m = new HashMap<>();
+       m.put("__body__", b);
+       RESULT = m; :}
+  ;
+
+request_body ::=
+    BODY EQUALS STRING:s SEMICOLON
+    {: RESULT = s; :}
+  | BODY EQUALS MULTILINE_STRING:s SEMICOLON
+    {: RESULT = s; :}
+  | BODY EQUALS NUMBER:n SEMICOLON
+    {: 
+       report_error("Body must be a string", null);
+       RESULT = String.valueOf(n);
+     :}
+  ;
+
+assertion ::=
+    EXPECT STATUS EQUALS NUMBER:n SEMICOLON
+    {: RESULT = new Assertion("status", "equals", null, n); :}
+  | EXPECT STATUS IN NUMBER:start DOTDOT NUMBER:end SEMICOLON
+    {: RESULT = new Assertion("status", "in_range", null, start + ".." + end); :}
+  | EXPECT STATUS EQUALS STRING:s SEMICOLON
+    {: 
+       report_error("Status must be integer", null);
+       RESULT = new Assertion("status", "equals", null, 0);
+     :}
+  | EXPECT HEADER STRING:k EQUALS STRING:v SEMICOLON
+    {: RESULT = new Assertion("header", "equals", k, v); :}
+  | EXPECT HEADER STRING:k CONTAINS STRING:v SEMICOLON
+    {: RESULT = new Assertion("header", "contains", k, v); :}
+  | EXPECT BODY CONTAINS STRING:v SEMICOLON
+    {: RESULT = new Assertion("body", "contains", null, v); :}
+  ;

@@ -1,0 +1,27 @@
+config {
+  base_url = "http://localhost:8080";
+  header "Content-Type" = "application/json";
+}
+
+let user = "admin";
+
+// Extra feature multi line strings check
+test LoginWithMultilineBody {
+  POST "/api/login" {
+    body = """
+{
+  "username": "$user",
+  "password": "1234"
+}
+""";
+  };
+  expect status = 200;
+  expect body contains "token";
+}
+
+// Extra feautre range check
+test GetUserWithRangeCheck {
+  GET "/api/users/42";
+  expect status in 200..299;
+  expect body contains "id";
+}
